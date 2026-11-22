@@ -13,3 +13,5 @@ logs/
 # Configuracao local das contas
 contas.json
 contas.antigo.json
+contas.corrompido.json
+contas.json.tmp
