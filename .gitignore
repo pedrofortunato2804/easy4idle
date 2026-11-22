@@ -1,0 +1,15 @@
+# Ambiente Python
+.venv/
+__pycache__/
+*.pyc
+
+# Perfis do navegador (cookies e sessoes logadas) - NAO versionar
+perfis/
+
+# Logs
+logs/
+*.log
+
+# Configuracao local das contas
+contas.json
+contas.antigo.json
