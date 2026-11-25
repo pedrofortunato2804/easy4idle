@@ -35,29 +35,6 @@
           "autocaptura": false
         }
       ]
-    },
-    {
-      "id": "twitchtv",
-      "nome": "twitch.tv",
-      "url": "https://twitch.tv",
-      "colunas": 2,
-      "contas": [
-        {
-          "id": "twitchtv_conta1",
-          "nome": "Conta 1",
-          "zoom": 0.75,
-          "mudo": true,
-          "url": "https://www.twitch.tv/canal_1"
-        },
-        {
-          "id": "twitchtv_conta1_2",
-          "nome": "Conta 1",
-          "zoom": 0.75,
-          "mudo": true,
-          "perfil": "twitchtv_conta1",
-          "url": "https://www.twitch.tv/canal_2"
-        }
-      ]
     }
   ]
 }

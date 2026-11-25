@@ -1,12 +1,7 @@
-"""Motores de navegador de um quadro, com a mesma interface para o painel.
+"""Motor de navegador de um quadro (Qt WebEngine, Chromium embutido).
 
-- MotorQt: Qt WebEngine (Chromium embutido). Usado nos jogos: tem as extensões
-  (/hunt) e o autoclique de captura.
-- MotorEdge: Microsoft Edge (WebView2). Usado em Twitch/Kick, que precisam de
-  H.264/AAC (ver edge.py).
-
-Os dois recebem o `perfil_id` (pasta em ./perfis): quadros com o mesmo perfil
-compartilham o login.
+Tem as extensões (/hunt) e o autoclique de captura. Recebe o `perfil_id`
+(pasta em ./perfis): quadros com o mesmo perfil compartilham o login.
 """
 import ctypes
 import logging
@@ -19,8 +14,6 @@ from PyQt6.QtCore import QObject, QUrl, pyqtSignal
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
-from . import streaming
-from .caminhos import PROFILES_DIR
 from .paginas import GamePage, liberar_perfil, obter_perfil
 
 log = logging.getLogger("easy4idle.motores")
@@ -130,52 +123,3 @@ class MotorQt(Motor):
         """Apaga a página antes do perfil (ordem exigida pelo Qt WebEngine)."""
         sip.delete(self.view)  # apaga a página junto (é filha da view)
         liberar_perfil(self.perfil_id)
-
-
-class MotorEdge(Motor):
-    def __init__(self, perfil_id, parent_widget):
-        super().__init__(parent_widget)
-        from .edge import EdgeView  # só carrega o .NET quando há stream
-        self.perfil_id = perfil_id
-        pasta = PROFILES_DIR / perfil_id / "edge"
-        pasta.mkdir(parents=True, exist_ok=True)
-        self.view = EdgeView(pasta, parent_widget)
-        self.view.adicionar_script(streaming.SCRIPT)
-        self.widget = self.view
-        self.view.progresso.connect(self.progresso)
-        self.view.carregou.connect(self.carregou)
-        self.view.url_mudou.connect(self.url_mudou)
-        self.view.travou.connect(self.travou)
-        self.erros = [self.view._erro] if self.view._erro else []
-
-    def set_url(self, url):
-        self.view.set_url(url)
-
-    def url(self):
-        return self.view.url()
-
-    def reload(self):
-        self.view.reload()
-
-    def set_zoom(self, z):
-        self.view.set_zoom(z)
-
-    def set_mudo(self, mudo):
-        self.view.set_mudo(mudo)
-
-    def run_js(self, codigo, callback=None):
-        self.view.run_js(codigo, callback)
-
-    def shutdown(self):
-        self.view.shutdown()
-        sip.delete(self.view)
-
-
-def criar_motor(url, perfil_id, parent_widget):
-    cls = MotorEdge if streaming.eh_streaming(url) else MotorQt
-    return cls(perfil_id, parent_widget)
-
-
-def motor_certo(motor, url):
-    """True se o motor atual serve para a URL (senão o painel troca de motor)."""
-    return isinstance(motor, MotorEdge) == streaming.eh_streaming(url)

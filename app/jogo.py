@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QGridLayout, QInputDialog, QLabel, QMessageBox, QSpinBox, QToolBar, QVBoxLayout, QWidget,
 )
 
-from . import autocaptura, config, streaming
+from . import autocaptura, config
 from .extensoes import atualizar_hunt
 from .painel import AccountPanel
 
@@ -65,11 +65,6 @@ class GameView(QWidget):
         self.act_captura = tb.addAction("🎯 Auto-captura em todas", self.toggle_captura_all)
         self.act_captura.setToolTip("Liga o autoclique de pokébola em todas as contas deste jogo "
                                     "(ou desliga, se todas já estiverem ligadas)")
-        # Streams (Twitch): resgate do baú de bônus
-        self.sep_resgate = tb.addSeparator()
-        self.act_resgate = tb.addAction("🎁 Resgate em todas", self.toggle_resgate_all)
-        self.act_resgate.setToolTip("Liga o resgate automático do bônus de pontos em todas as "
-                                    "streams da Twitch (ou desliga, se todas já estiverem ligadas)")
         # Exclusivo do pokeidle
         self.sep_hunt = tb.addSeparator()
         self.act_hunt = tb.addAction("🧩 Atualizar /hunt", lambda: atualizar_hunt(self))
@@ -87,16 +82,6 @@ class GameView(QWidget):
         captura = autocaptura.suportado(self.jogo["url"])
         self.sep_captura.setVisible(captura)
         self.act_captura.setVisible(captura)
-        resgate = streaming.tem_resgate(self.jogo["url"])
-        self.sep_resgate.setVisible(resgate)
-        self.act_resgate.setVisible(resgate)
-        if streaming.eh_streaming(self.jogo["url"]):
-            self.act_conta.setText("＋ Adicionar conta (novo login)")
-            self.act_conta.setToolTip("Abre um quadro com um login NOVO. Para mais uma stream numa "
-                                      "conta que já existe, use o ＋ no cabeçalho dela.")
-        else:
-            self.act_conta.setText("＋ Adicionar conta")
-            self.act_conta.setToolTip("")
 
     # ---- contas ----
     def add_panel(self, acc, posicao=None):
@@ -104,7 +89,7 @@ class GameView(QWidget):
         panel.changed.connect(self.changed)
         panel.focus_requested.connect(self.toggle_focus)
         panel.remove_requested.connect(self.remove_account)
-        panel.stream_requested.connect(self.new_stream)
+        panel.clone_requested.connect(self.new_clone)
         panel.icon_changed.connect(self._on_icon)
         if posicao is None:
             self.panels.append(panel)
@@ -135,21 +120,16 @@ class GameView(QWidget):
         log.info("Conta %s adicionada ao jogo %s", acc["id"], self.jogo["id"])
         self.changed.emit()
 
-    def new_stream(self, origem):
-        """Novo quadro com o MESMO login de `origem` (outra stream na mesma conta)."""
-        stream = origem.eh_stream()
-        titulo = "Outra stream nesta conta" if stream else "Outro quadro com este login"
-        rotulo = (f"Canal ou link da stream para “{origem.data['nome']}”\n"
-                  "(ex.: gaules, twitch.tv/gaules, kick.com/xqc):" if stream else
-                  "Endereço do novo quadro (vazio = o do jogo):")
-        texto, ok = QInputDialog.getText(self, titulo, rotulo)
+    def new_clone(self, origem):
+        """Novo quadro com o MESMO login de `origem`."""
+        titulo = "Outro quadro com este login"
+        texto, ok = QInputDialog.getText(self, titulo, "Endereço do novo quadro (vazio = o do jogo):")
         if not ok:
             return
         url = None
         try:
             if texto.strip():
-                url = (streaming.url_do_canal(texto, origem.url()) if stream
-                       else config.normalizar_url(texto))
+                url = config.normalizar_url(texto)
         except ValueError as e:
             QMessageBox.warning(self, titulo, str(e))
             return
@@ -236,13 +216,6 @@ class GameView(QWidget):
         ligar = not all(p.data.get("autocaptura", False) for p in self.panels)
         for p in self.panels:
             p.set_captura(ligar)
-        self.changed.emit()
-
-    def toggle_resgate_all(self):
-        streams = [p for p in self.panels if streaming.tem_resgate(p.url())]
-        ligar = not all(p.data.get("resgate", True) for p in streams)
-        for p in streams:
-            p.set_resgate(ligar)
         self.changed.emit()
 
     def mute_all(self, muted):

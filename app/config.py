@@ -11,8 +11,11 @@ Formato:
 
 O "id" de cada conta é único entre todos os jogos e, normalmente, é também o
 nome da pasta do perfil (login) em ./perfis. Campos opcionais:
-  "url"    endereço próprio do quadro (ex.: o canal da stream; sobrepõe o do jogo)
-  "perfil" id de outra conta cujo login este quadro usa — várias streams num login só
+  "url"    endereço próprio do quadro (sobrepõe o do jogo)
+  "perfil" id de outra conta cujo login este quadro usa — vários quadros num login só
+
+Sites de streaming (Twitch/Kick) não são mais suportados: pesavam demais em
+CPU e memória. Jogos e quadros com esses endereços são descartados ao carregar.
 """
 import json
 import logging
@@ -26,6 +29,7 @@ from .caminhos import CONFIG_FILE
 log = logging.getLogger("easy4idle.config")
 
 POKEIDLE_URL = "https://pokeidle.io/app"
+STREAMS = ("twitch.tv", "kick.com")  # não suportados (ver docstring)
 
 
 # --------------------------------------------------------------------------- #
@@ -36,7 +40,7 @@ def novo_jogo(jogo_id, nome, url):
 
 
 def nova_conta(conta_id, nome, perfil=None, url=None):
-    """`perfil`: id de outra conta cujo login este quadro usa (várias streams num login)."""
+    """`perfil`: id de outra conta cujo login este quadro usa (vários quadros num login)."""
     conta = {"id": conta_id, "nome": nome, "zoom": 0.75, "mudo": True}
     if perfil and perfil != conta_id:
         conta["perfil"] = perfil
@@ -95,7 +99,30 @@ def carregar():
         backup = CONFIG_FILE.with_name("contas.antigo.json")
         shutil.copy2(CONFIG_FILE, backup)
         log.info("contas.json migrado para o formato com vários jogos (backup em %s)", backup.name)
-    return _completar(cfg)
+    cfg = _completar(cfg)
+    if _tirar_streams(cfg):
+        backup = CONFIG_FILE.with_name("contas.com-streams.json")
+        shutil.copy2(CONFIG_FILE, backup)
+        log.info("Quadros de Twitch/Kick descartados do contas.json (backup em %s)", backup.name)
+    return cfg
+
+
+def _tirar_streams(cfg):
+    """Remove jogos e quadros de Twitch/Kick. True se removeu algum."""
+    removeu = False
+    jogos = []
+    for jogo in cfg["jogos"]:
+        if eh_stream(jogo["url"]):
+            removeu = True
+            continue
+        contas = [c for c in jogo["contas"] if not eh_stream(c.get("url") or "")]
+        removeu = removeu or len(contas) != len(jogo["contas"])
+        jogo["contas"] = contas
+        jogos.append(jogo)
+    cfg["jogos"] = jogos
+    if cfg.get("jogo_atual") not in {j["id"] for j in jogos}:
+        cfg["jogo_atual"] = jogos[0]["id"] if jogos else None
+    return removeu
 
 
 def salvar(cfg):
@@ -132,12 +159,20 @@ def normalizar_url(texto):
     p = urlparse(t)
     if p.scheme not in ("http", "https") or not p.hostname or "." not in p.hostname:
         raise ValueError(f"“{texto.strip()}” não parece um endereço de site válido.")
+    if eh_stream(t):
+        raise ValueError("Twitch e Kick não são suportados no easy4idle "
+                         "(as lives pesavam demais em CPU e memória).")
     return t
 
 
 def nome_pelo_host(url):
     host = urlparse(url).hostname or url
     return host[4:] if host.startswith("www.") else host
+
+
+def eh_stream(url):
+    host = urlparse(url).hostname or ""
+    return any(host == d or host.endswith("." + d) for d in STREAMS)
 
 
 def eh_pokeidle(url):

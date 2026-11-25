@@ -1,5 +1,2 @@
 PyQt6
 PyQt6-WebEngine
-# Motor do Edge (WebView2) para Twitch/Kick: pythonnet + DLLs do WebView2 (vêm no pywebview)
-pythonnet
-pywebview

@@ -1,8 +1,8 @@
-"""Painel de uma conta: cabeçalho com controles + a página (jogo ou stream).
+"""Painel de uma conta: cabeçalho com controles + a página do jogo.
 
 Cada painel tem um "perfil" (pasta em ./perfis com o login). Normalmente é
 o próprio id da conta, mas vários painéis podem apontar para o mesmo perfil
-— é assim que se abrem várias streams com um login só.
+("Abrir outro quadro com este login").
 """
 import logging
 import time
@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import (
     QFrame, QHBoxLayout, QInputDialog, QLabel, QMenu, QMessageBox, QPushButton, QVBoxLayout,
 )
 
-from . import autocaptura, config, streaming
-from .motores import MotorEdge, MotorQt, criar_motor, motor_certo
+from . import autocaptura, config
+from .motores import MotorQt
 
 log = logging.getLogger("easy4idle.painel")
 
@@ -37,7 +37,7 @@ class AccountPanel(QFrame):
     changed = pyqtSignal()
     focus_requested = pyqtSignal(object)
     remove_requested = pyqtSignal(object)
-    stream_requested = pyqtSignal(object)  # "abrir outro quadro com este login"
+    clone_requested = pyqtSignal(object)  # "abrir outro quadro com este login"
     icon_changed = pyqtSignal(QIcon)
 
     def __init__(self, data, game_url):
@@ -60,11 +60,6 @@ class AccountPanel(QFrame):
         self.status = QLabel("")
         self.status.setObjectName("status")
 
-        self.btn_canal = small_button("📺", "Trocar o canal desta stream")
-        self.btn_stream = small_button("＋", "Abrir outra stream com este mesmo login")
-        self.btn_resgate = small_button("🎁", "")
-        self.btn_resgate.setObjectName("resgate")
-        self.btn_resgate.setCheckable(True)
         self.btn_captura = small_button("🎯", "")
         self.btn_captura.setObjectName("captura")
         self.btn_captura.setCheckable(True)
@@ -78,9 +73,6 @@ class AccountPanel(QFrame):
         self.btn_focus = small_button("⛶", "Expandir / voltar à grade")
         self.btn_remove = small_button("✕", "Remover este quadro")
 
-        self.btn_canal.clicked.connect(self.change_address)
-        self.btn_stream.clicked.connect(lambda: self.stream_requested.emit(self))
-        self.btn_resgate.clicked.connect(self.toggle_resgate)
         self.btn_captura.clicked.connect(self.toggle_captura)
         self.btn_reload.clicked.connect(self.reload)
         self.btn_zoom_out.clicked.connect(lambda: self.change_zoom(-0.05))
@@ -94,8 +86,7 @@ class AccountPanel(QFrame):
         header.setSpacing(3)
         header.addWidget(self.name_btn)
         header.addWidget(self.status, 1)
-        for w in (self.btn_canal, self.btn_stream, self.btn_resgate, self.btn_captura,
-                  self.btn_reload, self.btn_zoom_out, self.zoom_label, self.btn_zoom_in,
+        for w in (self.btn_captura, self.btn_reload, self.btn_zoom_out, self.zoom_label, self.btn_zoom_in,
                   self.btn_mute, self.btn_focus, self.btn_remove):
             header.addWidget(w)
 
@@ -114,12 +105,6 @@ class AccountPanel(QFrame):
         self.timer_captura.setInterval(3000)
         self.timer_captura.timeout.connect(self.apply_captura)
 
-        # --- streams: estado do resgate / vídeo ---
-        self.resgates = 0
-        self.timer_stream = QTimer(self)
-        self.timer_stream.setInterval(streaming.INTERVALO_MS)
-        self.timer_stream.timeout.connect(self.apply_resgate)
-
         # --- vigia: reinicia a página de jogo que travou ou pesou demais ---
         self.timer_vigia = QTimer(self)
         self.timer_vigia.setInterval(VIGIA_INTERVALO_MS)
@@ -129,37 +114,21 @@ class AccountPanel(QFrame):
         self._criar_motor()
         self.set_url_atual(self.url())
 
-    # ---- motor (Qt para jogos, Edge para streams) ----
+    # ---- motor (Qt WebEngine) ----
     def _criar_motor(self):
         self._pagina_pronta = False
         self._vigia_zerar()
-        self.motor = criar_motor(self.url(), self.perfil(), self)
-        # Kick: põe a stream na menor resolução clicando no menu do player
-        self._qualidade_kick = (streaming.QualidadeKick(self.motor.view)
-                                if isinstance(self.motor, MotorEdge) else None)
-        self._diag_qualidade = None
+        self.motor = MotorQt(self.perfil(), self)
         self.lay.addWidget(self.motor.widget, 1)
         self.motor.progresso.connect(lambda p: self.status.setText(f"carregando {p}%"))
         self.motor.carregou.connect(self.on_load_finished)
         self.motor.travou.connect(self.on_crash)
         self.motor.icone.connect(self._on_icon)
-        self.motor.url_mudou.connect(self.on_url_changed)
         if self.motor.erros:
             self.status.setToolTip("Avisos:\n" + "\n".join(self.motor.erros))
         self.apply_zoom()
         self.apply_mute()
         self.update_kind()
-
-    def _trocar_motor_se_preciso(self):
-        if motor_certo(self.motor, self.url()):
-            return False
-        self.timer_captura.stop()
-        self.timer_stream.stop()
-        self.lay.removeWidget(self.motor.widget)
-        self.motor.shutdown()
-        self.motor.deleteLater()
-        self._criar_motor()
-        return True
 
     def _on_icon(self, icon):
         if not icon.isNull():
@@ -171,15 +140,10 @@ class AccountPanel(QFrame):
         return self.data.get("perfil") or self.data["id"]
 
     def url(self):
-        """URL própria da conta (canal da stream etc.) ou a do jogo."""
+        """URL própria da conta (se tiver) ou a do jogo."""
         return self.data.get("url") or self.game_url
 
-    def eh_stream(self):
-        return streaming.eh_streaming(self.url())
-
     def set_url_atual(self, url):
-        """Navega para a URL (troca de motor se preciso: jogo ↔ stream)."""
-        self._trocar_motor_se_preciso()
         self.motor.set_url(url)
         self.update_kind()
 
@@ -190,37 +154,13 @@ class AccountPanel(QFrame):
         else:
             self.update_kind()
 
-    def on_url_changed(self, url):
-        """Se navegou para outro canal dentro do quadro, lembra dele."""
-        if not self.eh_stream():
-            return
-        canal = streaming.canal_da_url(url)
-        if canal and url != self.data.get("url"):
-            self.data["url"] = url
-            self.update_name()
-            self.changed.emit()
-
     def update_kind(self):
-        """Mostra os botões que fazem sentido para o tipo de site."""
-        stream = self.eh_stream()
-        self.btn_canal.setVisible(stream)
-        self.btn_stream.setVisible(stream)
-        self.btn_resgate.setVisible(stream and streaming.tem_resgate(self.url()))
+        """Mostra os botões que fazem sentido para o site."""
         self.update_name()
-        if stream:
-            self.timer_captura.stop()
-            self.btn_captura.setVisible(False)
-            if not self.timer_stream.isActive():
-                self.timer_stream.start()
-            self.apply_resgate()
-        else:
-            self.timer_stream.stop()
-            self.update_captura_visibility()
+        self.update_captura_visibility()
 
     def update_name(self):
-        nome = self.data["nome"]
-        canal = streaming.canal_da_url(self.url()) if self.eh_stream() else None
-        self.name_btn.setText(f"{nome} · {canal}" if canal else nome)
+        self.name_btn.setText(self.data["nome"])
 
     # ---- ações ----
     def reload(self):
@@ -230,10 +170,7 @@ class AccountPanel(QFrame):
         self._pagina_pronta = self._pagina_pronta or ok
         self.status.setText("" if ok else "falha ao carregar")
         self.apply_zoom()
-        if self.eh_stream():
-            self.apply_resgate()
-        else:
-            self.apply_captura()  # a página recarregada volta com o autoclique desligado
+        self.apply_captura()  # a página recarregada volta com o autoclique desligado
 
     def on_crash(self, detalhe):
         log.warning("Conta %s travou (%s); recarregando", self.data["id"], detalhe)
@@ -254,7 +191,7 @@ class AccountPanel(QFrame):
         casos o processo da página é encerrado e ela é recarregada.
         """
         motor = self.motor
-        if not isinstance(motor, MotorQt) or not self._pagina_pronta:
+        if not self._pagina_pronta:
             return
         mb = motor.memoria_mb()
         if mb and mb > VIGIA_MEMORIA_MB:
@@ -286,12 +223,18 @@ class AccountPanel(QFrame):
     def show_menu(self):
         menu = QMenu(self)
         menu.addAction("Renomear…", self.rename)
-        menu.addAction("Trocar canal…" if self.eh_stream() else "Trocar endereço…",
-                       self.change_address)
+        menu.addAction("Trocar endereço…", self.change_address)
         if self.data.get("url") and self.data["url"] != self.game_url:
             menu.addAction("Voltar ao endereço do jogo", self.reset_address)
+        if self.btn_captura.isVisible():
+            menu.addSeparator()
+            act = menu.addAction("Usar Ultra Ball nos shiny", self.toggle_ultra_shiny)
+            act.setCheckable(True)
+            act.setChecked(self.data.get("ultra_shiny", False))
+            act.setToolTip("Com a auto-captura ligada, troca para a Ultra Ball quando aparece "
+                           "um shiny e volta para a bola de antes depois")
         menu.addSeparator()
-        menu.addAction("Abrir outro quadro com este login", lambda: self.stream_requested.emit(self))
+        menu.addAction("Abrir outro quadro com este login", lambda: self.clone_requested.emit(self))
         menu.exec(self.name_btn.mapToGlobal(self.name_btn.rect().bottomLeft()))
 
     def rename(self):
@@ -302,16 +245,12 @@ class AccountPanel(QFrame):
             self.changed.emit()
 
     def change_address(self):
-        stream = self.eh_stream()
-        titulo = "Trocar canal" if stream else "Trocar endereço"
-        rotulo = ("Nome do canal ou link da stream\n(ex.: gaules, twitch.tv/gaules, kick.com/xqc):"
-                  if stream else "Endereço deste quadro:")
-        atual = streaming.canal_da_url(self.url()) if stream else self.url()
-        texto, ok = QInputDialog.getText(self, titulo, rotulo, text=atual or "")
+        titulo = "Trocar endereço"
+        texto, ok = QInputDialog.getText(self, titulo, "Endereço deste quadro:", text=self.url())
         if not ok:
             return
         try:
-            url = streaming.url_do_canal(texto, self.url()) if stream else config.normalizar_url(texto)
+            url = config.normalizar_url(texto)
         except ValueError as e:
             QMessageBox.warning(self, titulo, str(e))
             return
@@ -348,64 +287,9 @@ class AccountPanel(QFrame):
         self.motor.set_mudo(muted)
         self.btn_mute.setText("🔇" if muted else "🔊")
 
-    # ---- streams: resgate automático do bônus ----
-    def toggle_resgate(self):
-        self.set_resgate(not self.data.get("resgate", True))
-        self.changed.emit()
-
-    def set_resgate(self, ligado):
-        self.data["resgate"] = ligado
-        self.apply_resgate()
-
-    def apply_resgate(self):
-        if not self.eh_stream():
-            return
-        ligado = self.data.get("resgate", True) and streaming.tem_resgate(self.url())
-        self.btn_resgate.setChecked(ligado)
-        self.motor.run_js(streaming.script_estado(ligado), self._on_estado_stream)
-
-    def _on_estado_stream(self, estado):
-        if sip.isdeleted(self) or not self.eh_stream():
-            return
-        tocando = None
-        if isinstance(estado, dict):
-            self.resgates = int(estado.get("resgates") or 0)
-            tocando = estado.get("tocando")
-            if estado.get("kickPrecisa") and self._qualidade_kick:
-                self._qualidade_kick.rodar()
-            diag = estado.get("diagQualidade")
-            if diag and diag != self._diag_qualidade:
-                self._diag_qualidade = diag
-                log.info("Conta %s (%s): qualidade da Kick — %s", self.data["id"],
-                         streaming.canal_da_url(self.url()), diag)
-        ligado = self.btn_resgate.isChecked()
-        self.btn_resgate.setToolTip(
-            f"Resgate automático do bônus de pontos: {'LIGADO' if ligado else 'desligado'}\n"
-            "Clica no baú de bônus que a Twitch mostra embaixo do chat\n"
-            "(o chat precisa estar aberto no quadro).\n"
-            f"Bônus resgatados desde que a página abriu: {self.resgates}"
-        )
-        # Avisos no cabeçalho: stream parada (pontos não sobem) ou aviso de cookies
-        # da Kick na frente do player (impede de baixar a qualidade)
-        if not self.status.text().startswith("carregando"):
-            if tocando is False and streaming.canal_da_url(self.url()):
-                self.status.setText("⏸ vídeo parado")
-            elif self._diag_qualidade == streaming.AVISO_COOKIES:
-                self.status.setText("🍪 responda o aviso de cookies")
-                self.status.setToolTip("O aviso de cookies da Kick está na frente do player e "
-                                       "impede o easy4idle de baixar a qualidade da stream.\n"
-                                       "Aceite ou recuse os cookies neste quadro (só uma vez por login).")
-            elif self._diag_qualidade == streaming.AVISO_IDADE:
-                self.status.setText("🔞 confirme a idade no quadro")
-                self.status.setToolTip("A Kick pede para confirmar que você tem 18 anos neste canal, "
-                                       "e o aviso fica na frente do player.\n"
-                                       "Confirme no quadro para o easy4idle poder baixar a qualidade.")
-            elif self.status.text().startswith(("⏸", "🍪", "🔞")):
-                self.status.setText("")
-
     # ---- autoclique de captura (jogos) ----
     def update_captura_visibility(self):
-        ok = autocaptura.suportado(self.url()) and isinstance(self.motor, MotorQt)
+        ok = autocaptura.suportado(self.url())
         self.btn_captura.setVisible(ok)
         self.apply_captura()
 
@@ -423,8 +307,6 @@ class AccountPanel(QFrame):
         self.apply_captura()
 
     def apply_captura(self):
-        if not isinstance(self.motor, MotorQt):
-            return
         ligado = self.data.get("autocaptura", False) and autocaptura.suportado(self.url())
         self.btn_captura.setChecked(ligado)
         if ligado:
@@ -436,7 +318,15 @@ class AccountPanel(QFrame):
             self._captura_fase = None
             self.timer_captura.stop()
         lancando = bool(self._captura_fase and self._captura_fase[0])
-        autocaptura.aplicar(self.motor.page, lancando, self._on_estado_captura)
+        autocaptura.aplicar(self.motor.page, lancando, self.data.get("ultra_shiny", False),
+                            self._on_estado_captura)
+
+    def toggle_ultra_shiny(self):
+        self.data["ultra_shiny"] = not self.data.get("ultra_shiny", False)
+        log.info("Conta %s: Ultra Ball nos shiny %s", self.data["id"],
+                 "ligada" if self.data["ultra_shiny"] else "desligada")
+        self.apply_captura()
+        self.changed.emit()
 
     def _on_estado_captura(self, estado):
         """Mostra no cabeçalho/tooltip o turno atual e registra no log o que o script vê."""
@@ -457,11 +347,22 @@ class AccountPanel(QFrame):
         if isinstance(estado, dict) and f is not None:
             corpos = (f"Corpos no painel “Captura” agora: {int(estado.get('corpos') or 0)} "
                       f"({int(estado.get('habilitados') or 0)} com botão “Lançar” ativo)\n")
+            if estado.get("bola"):
+                corpos += f"Bola na mão: {estado['bola']}\n"
+        shiny = "Ultra Ball nos shiny: desligada (ligue no menu do nome da conta)\n"
+        if self.data.get("ultra_shiny", False):
+            shiny = "Ultra Ball nos shiny: ligada"
+            if isinstance(estado, dict):
+                shiny += (f" · shiny no painel agora: {int(estado.get('shinies') or 0)}"
+                          f" · Ultras lançadas em shiny: {int(estado.get('shiny_lancadas') or 0)}")
+                if estado.get("sem_ultra"):
+                    shiny += "\n  ⚠ sem Ultra Ball que valha aqui — lançando a bola de sempre"
+            shiny += "\n"
         self.btn_captura.setToolTip(
             f"Autoclique de captura: {linha}\n"
             "Lança pokébola sozinho em cada pokémon abatido (painel “Captura”).\n"
             "Trabalha em turnos: 1 hora lançando, 1 hora parado, e assim por diante.\n"
-            f"{corpos}"
+            f"{corpos}{shiny}"
             f"Bolas lançadas desde que a página abriu: {self.lancadas}"
         )
         # Mostra a pausa sem apagar o "carregando NN%"
@@ -487,9 +388,12 @@ class AccountPanel(QFrame):
             self._captura_ultimo_log = agora
             if isinstance(estado, dict):
                 log.info("Conta %s: lançando · corpos=%s habilitados=%s lançadas=%s "
-                         "script_ligado=%s visibilidade_real=%s",
+                         "script_ligado=%s visibilidade_real=%s bola=%s shiny=%s "
+                         "ultras_em_shiny=%s trocas_de_bola=%s",
                          self.data["id"], estado.get("corpos"), estado.get("habilitados"),
-                         estado.get("lancadas"), estado.get("ligado"), estado.get("visibilidade"))
+                         estado.get("lancadas"), estado.get("ligado"), estado.get("visibilidade"),
+                         estado.get("bola"), estado.get("shinies"), estado.get("shiny_lancadas"),
+                         estado.get("trocas"))
             else:
                 log.warning("Conta %s: script do autoclique não respondeu na página (%s)",
                             self.data["id"], self.motor.url())
@@ -499,6 +403,5 @@ class AccountPanel(QFrame):
 
     def shutdown(self):
         self.timer_captura.stop()
-        self.timer_stream.stop()
         self.timer_vigia.stop()
         self.motor.shutdown()

@@ -35,10 +35,6 @@ def main():
     from app.janela import STYLE, MainWindow
 
     PROFILES_DIR.mkdir(exist_ok=True)
-    # Os quadros do Edge (streams) são janelas nativas; isto evita que os
-    # quadros vizinhos também virem nativos (piscadas e lentidão).
-    from PyQt6.QtCore import Qt
-    QApplication.setAttribute(Qt.ApplicationAttribute.AA_DontCreateNativeWidgetSiblings)
     app = QApplication(sys.argv)
     app.setApplicationName("easy4idle")
     app.setStyleSheet(STYLE)

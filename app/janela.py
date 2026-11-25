@@ -318,7 +318,7 @@ QPushButton { background: #33353d; border: none; border-radius: 3px; }
 QPushButton:hover { background: #454852; }
 QPushButton#name { background: transparent; font-weight: bold; padding: 0 6px; text-align: left; }
 QPushButton#name:hover { color: #ffcb05; }
-QPushButton#captura:checked, QPushButton#resgate:checked { background: #2e7d32; border: 1px solid #66bb6a; }
+QPushButton#captura:checked { background: #2e7d32; border: 1px solid #66bb6a; }
 QLabel#status, QLabel#hint { color: #8a8d99; }
 QSpinBox, QLineEdit { background: #33353d; border: none; padding: 3px 4px; }
 QMenu { background: #26272d; border: 1px solid #3a3c45; }
